@@ -204,7 +204,11 @@ func initRootCmd(rootCmd *cobra.Command, evmApp *evmd.EVMD) {
 	}
 }
 
-func addModuleInitFlags(_ *cobra.Command) {}
+func addModuleInitFlags(cmd *cobra.Command) {
+	// Consensus engine backend for `evmd start`. Empty → cometbft.
+	cmd.Flags().String("engine", "",
+		`consensus engine backend ("cometbft", or "monadbft" when the bridge backend is linked)`)
+}
 
 func queryCommand() *cobra.Command {
 	cmd := &cobra.Command{
