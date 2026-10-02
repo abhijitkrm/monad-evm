@@ -19,12 +19,12 @@ import (
 	"github.com/cometbft/cometbft/node"
 	"github.com/cometbft/cometbft/p2p"
 	pvm "github.com/cometbft/cometbft/privval"
-	"github.com/cometbft/cometbft/proxy"
 	rpcclient "github.com/cometbft/cometbft/rpc/client"
-	"github.com/cometbft/cometbft/rpc/client/local"
 	cmttypes "github.com/cometbft/cometbft/types"
 
 	dbm "github.com/cosmos/cosmos-db"
+	"github.com/cosmos/evm/engine"
+	enginecomet "github.com/cosmos/evm/engine/comet"
 	"github.com/cosmos/evm/indexer"
 	evmmempool "github.com/cosmos/evm/mempool"
 	evmmetrics "github.com/cosmos/evm/metrics"
@@ -429,35 +429,33 @@ func startInProcess(svrCtx *server.Context, clientCtx client.Context, opts Start
 	genDocProvider := GenDocProvider(cfg)
 
 	var (
-		bftNode  *node.Node
+		eng      engine.Engine
 		gRPCOnly = svrCtx.Viper.GetBool(srvflags.GRPCOnly)
 	)
 
 	if gRPCOnly {
-		logger.Info("starting node in query only mode; CometBFT is disabled")
+		logger.Info("starting node in query only mode; consensus engine is disabled")
 		config.GRPC.Enable = true
 		config.JSONRPC.EnableIndexer = false
 	} else {
-		logger.Info("starting node with ABCI CometBFT in-process")
-
-		cmtApp := server.NewCometABCIWrapper(app)
-		bftNode, err = node.NewNode(
-			cfg,
-			pvm.LoadOrGenFilePV(cfg.PrivValidatorKeyFile(), cfg.PrivValidatorStateFile()),
-			nodeKey,
-			proxy.NewLocalClientCreator(cmtApp),
-			genDocProvider,
-			cmtcfg.DefaultDBProvider,
-			node.DefaultMetricsProvider(cfg.Instrumentation),
-			servercmtlog.CometLoggerWrapper{Logger: svrCtx.Logger.With("server", "node")},
-		)
-		if err != nil {
-			logger.Error("failed init node", "error", err.Error())
-			return err
+		engineKind := svrCtx.Viper.GetString("engine")
+		if engineKind == "" {
+			engineKind = enginecomet.Kind
 		}
+		logger.Info("starting node with ABCI consensus engine in-process", "engine", engineKind)
 
-		if err := bftNode.Start(); err != nil {
-			logger.Error("failed start CometBFT server", "error", err.Error())
+		eng, err = engine.Start(engineKind, engine.Options{
+			Config:          cfg,
+			PrivValidator:   pvm.LoadOrGenFilePV(cfg.PrivValidatorKeyFile(), cfg.PrivValidatorStateFile()),
+			NodeKey:         nodeKey,
+			App:             app,
+			GenDocProvider:  genDocProvider,
+			DBProvider:      cmtcfg.DefaultDBProvider,
+			MetricsProvider: node.DefaultMetricsProvider(cfg.Instrumentation),
+			Logger:          servercmtlog.CometLoggerWrapper{Logger: svrCtx.Logger.With("server", "node")},
+		})
+		if err != nil {
+			logger.Error("failed init consensus engine", "engine", engineKind, "error", err.Error())
 			return err
 		}
 
@@ -465,11 +463,11 @@ func startInProcess(svrCtx *server.Context, clientCtx client.Context, opts Start
 			SetEventBus(eventBus *cmttypes.EventBus)
 		}
 		if m, ok := evmApp.GetMempool().(EventBusser); ok && m != nil {
-			m.SetEventBus(bftNode.EventBus())
+			m.SetEventBus(eng.EventBus())
 		}
 		defer func() {
-			if bftNode.IsRunning() {
-				_ = bftNode.Stop()
+			if eng.IsRunning() {
+				_ = eng.Stop()
 			}
 		}()
 	}
@@ -477,8 +475,8 @@ func startInProcess(svrCtx *server.Context, clientCtx client.Context, opts Start
 	// Add the tx service to the gRPC router. We only need to register this
 	// service if API or gRPC or JSONRPC is enabled, and avoid doing so in the general
 	// case, because it spawns a new local CometBFT RPC client.
-	if (config.API.Enable || config.GRPC.Enable || config.JSONRPC.Enable || config.JSONRPC.EnableIndexer) && bftNode != nil {
-		clientCtx = clientCtx.WithClient(local.New(bftNode))
+	if (config.API.Enable || config.GRPC.Enable || config.JSONRPC.Enable || config.JSONRPC.EnableIndexer) && eng != nil {
+		clientCtx = clientCtx.WithClient(eng.Client())
 
 		app.RegisterTxService(clientCtx)
 		app.RegisterTendermintService(clientCtx)
