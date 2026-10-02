@@ -9,6 +9,8 @@ package types
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -22,6 +24,16 @@ var testChainConfig *ChainConfig
 // testChainConfigMu protects concurrent access to testChainConfig
 var testChainConfigMu sync.RWMutex
 
+// eipExtMu serializes EVM-table mutation; eipExtGen counts ResetTestConfig
+// calls so a real reset forces re-application of the recorded extensions.
+var (
+	eipExtMu            sync.Mutex
+	eipExtGen           uint64
+	eipExtAppliedAtGen  uint64
+	appliedDefaultEIPs  []int64
+	appliedActivatorIDs []int
+)
+
 // Configure applies the changes to the virtual machine configuration.
 func (ec *EVMConfigurator) Configure() error {
 	// If Configure method has been already used in the object, return
@@ -34,11 +46,7 @@ func (ec *EVMConfigurator) Configure() error {
 		return err
 	}
 
-	if err := extendDefaultExtraEIPs(ec.extendedDefaultExtraEIPs); err != nil {
-		return err
-	}
-
-	if err := vm.ExtendActivators(ec.extendedEIPs); err != nil {
+	if err := applyTestEIPExtensions(ec.extendedDefaultExtraEIPs, ec.extendedEIPs); err != nil {
 		return err
 	}
 
@@ -49,9 +57,43 @@ func (ec *EVMConfigurator) Configure() error {
 	return nil
 }
 
+// applyTestEIPExtensions extends the process-global EVM tables idempotently:
+// test processes hosting multiple in-process apps (multi-node devnets)
+// Configure once per app over the same globals, and geth's activator table
+// panics on duplicate activation. An identical re-application is a no-op;
+// ResetTestConfig bumps the generation to force re-application.
+func applyTestEIPExtensions(defaultExtra []int64, activators map[int]func(*vm.JumpTable)) error {
+	eipExtMu.Lock()
+	defer eipExtMu.Unlock()
+	if eipExtAppliedAtGen == eipExtGen &&
+		slices.Equal(appliedDefaultEIPs, defaultExtra) &&
+		slices.Equal(appliedActivatorIDs, sortedKeys(activators)) {
+		return nil
+	}
+	if err := extendDefaultExtraEIPs(defaultExtra); err != nil {
+		return err
+	}
+	if err := vm.ExtendActivators(activators); err != nil {
+		return err
+	}
+	appliedDefaultEIPs = slices.Clone(defaultExtra)
+	appliedActivatorIDs = sortedKeys(activators)
+	eipExtAppliedAtGen = eipExtGen
+	return nil
+}
+
+func sortedKeys(m map[int]func(*vm.JumpTable)) []int {
+	keys := slices.Collect(maps.Keys(m))
+	slices.Sort(keys)
+	return keys
+}
+
 func (ec *EVMConfigurator) ResetTestConfig() {
 	vm.ResetActivators()
 	resetEVMCoinInfo()
+	eipExtMu.Lock()
+	eipExtGen++
+	eipExtMu.Unlock()
 	testChainConfigMu.Lock()
 	testChainConfig = nil
 	testChainConfigMu.Unlock()

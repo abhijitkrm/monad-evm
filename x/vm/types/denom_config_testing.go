@@ -106,11 +106,17 @@ func GetEVMCoinDisplayDenom() string {
 }
 
 // setTestingEVMCoinInfo allows to define denom and decimals of the coin used in the EVM.
+// An identical re-set is a no-op: test processes hosting multiple in-process
+// apps (multi-node devnets) run InitGenesis once per app over shared globals,
+// and resetting them between constructions races the running apps' reads.
 func setTestingEVMCoinInfo(eci EvmCoinInfo) error {
 	testingEvmCoinInfoMu.Lock()
 	defer testingEvmCoinInfoMu.Unlock()
 
 	if testingEvmCoinInfo != nil {
+		if *testingEvmCoinInfo == eci {
+			return nil
+		}
 		return errors.New("testing EVM coin info already set. Make sure you run the configurator's ResetTestConfig before trying to set a new evm coin info")
 	}
 
