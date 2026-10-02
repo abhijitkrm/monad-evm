@@ -32,6 +32,10 @@ var _ engine.Engine = (*cometEngine)(nil)
 // Start builds and starts an in-process CometBFT node over the app.
 func Start(opts engine.Options) (engine.Engine, error) {
 	cmtApp := server.NewCometABCIWrapper(opts.App)
+	metrics := opts.MetricsProvider
+	if metrics == nil {
+		metrics = node.DefaultMetricsProvider(opts.Config.Instrumentation)
+	}
 	n, err := node.NewNode(
 		opts.Config,
 		opts.PrivValidator,
@@ -39,7 +43,7 @@ func Start(opts engine.Options) (engine.Engine, error) {
 		proxy.NewLocalClientCreator(cmtApp),
 		opts.GenDocProvider,
 		opts.DBProvider,
-		opts.MetricsProvider,
+		metrics,
 		opts.Logger,
 	)
 	if err != nil {
