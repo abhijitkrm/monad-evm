@@ -154,6 +154,7 @@ type EVMD struct {
 	appCodec          codec.Codec
 	interfaceRegistry types.InterfaceRegistry
 	txConfig          client.TxConfig
+	preDecoder        *parallelTxDecoder
 
 	pendingTxListeners []evmante.PendingTxListener
 
@@ -220,12 +221,13 @@ func NewExampleApp(
 		baseapp.SetOptimisticExecution(),
 	)
 
+	preDecoder := &parallelTxDecoder{inner: txDecoder}
 	bApp := baseapp.NewBaseApp(
 		appName,
 		logger,
 		db,
 		// use transaction decoder to support the sdk.Tx interface instead of sdk.StdTx
-		txDecoder,
+		preDecoder.Decode,
 		baseAppOptions...,
 	)
 	bApp.SetVersion(version.Version)
@@ -268,6 +270,7 @@ func NewExampleApp(
 
 	app := &EVMD{
 		BaseApp:           bApp,
+		preDecoder:        preDecoder,
 		legacyAmino:       legacyAmino,
 		appCodec:          appCodec,
 		txConfig:          txConfig,
@@ -780,7 +783,7 @@ func NewExampleApp(
 	}
 
 	vmrunner.SetRunner(bApp, txnrunner.NewSTMRunner(
-		txDecoder,
+		preDecoder.Decode,
 		nonTransientKeys,
 		min(goruntime.GOMAXPROCS(0), goruntime.NumCPU()),
 		true,
@@ -851,6 +854,9 @@ func (app *EVMD) EndBlocker(ctx sdk.Context) (sdk.EndBlock, error) {
 }
 
 func (app *EVMD) FinalizeBlock(req *abci.RequestFinalizeBlock) (res *abci.ResponseFinalizeBlock, err error) {
+	if app.preDecoder != nil {
+		app.preDecoder.preDecode(req.Txs, req.Height, req.Time)
+	}
 	return app.BaseApp.FinalizeBlock(req)
 }
 
