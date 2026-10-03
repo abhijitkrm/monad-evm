@@ -3,6 +3,14 @@ src="repo_header.svg"
 alt="Cosmos EVM - A plug-and-play solution that adds EVM compatibility and customizability to your chain"
 />
 
+> [!NOTE]
+> **Monad fork** — maintained fork of [cosmos/evm](https://github.com/cosmos/evm)
+> for the [MonadBFT consensus engine](https://github.com/abhijitkrm/monadbft-go).
+> Adds a pluggable consensus-engine seam (`engine/`), the `evmd --engine`
+> flag, and `evmd start` wiring so MonadBFT can replace CometBFT in-process.
+> Integration work lives on [`monadbft-engine-seam`](https://github.com/abhijitkrm/monad-evm/tree/monadbft-engine-seam);
+> `main` tracks upstream. Upstream syncs land via `upstream/main` → merge/rebase review.
+
 ## What is Cosmos EVM?
 
 Cosmos EVM is a plug-and-play solution that adds EVM compatibility and customizability to your Cosmos SDK chain. Cosmos EVM is used by Ondo, Mezo, Mantra, XRP sidechain, Telegram Application Chain (TAC), Stable, and others. Cosmos EVM equips Cosmos chains with complete Ethereum capabilities: Solidity smart contracts, Ethereum JSON-RPC, native support for the EVM wallet/token/user experience, and access to the entire Ethereum developer ecosystem. Its precompiles and extensions allow developers to leverage modules like [IBC](https://github.com/cosmos/ibc-go) with EVM and get native ERC-20 support for tokens on Cosmos. 
