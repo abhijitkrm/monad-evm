@@ -20,7 +20,6 @@ package legacypool
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"math/big"
 	"slices"
@@ -1803,7 +1802,12 @@ func (pool *LegacyPool) resetInternalState(newHead *types.Header, reinject types
 
 	ctx, err := pool.chain.GetLatestContext()
 	if err != nil {
-		panic(fmt.Errorf("failed to get latest context for rechecker: %w", err))
+		// Transient under engines that roll back speculative store versions
+		// (monadbft): the latest height can briefly resolve ahead of the
+		// materialized IAVL trees. A node must never panic on a query
+		// context error — skip this reorg; the next head event retries.
+		log.Error("Rechecker latest context unavailable, skipping reorg", "err", err)
+		return
 	}
 	pool.rechecker.Update(ctx, newHead)
 	pool.validPendingTxs.StartNewHeight(newHead.Number)

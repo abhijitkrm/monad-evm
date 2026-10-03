@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	goruntime "runtime"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/spf13/cast"
@@ -155,6 +156,7 @@ type EVMD struct {
 	interfaceRegistry types.InterfaceRegistry
 	txConfig          client.TxConfig
 	preDecoder        *parallelTxDecoder
+	specLock          sync.Mutex
 
 	pendingTxListeners []evmante.PendingTxListener
 
@@ -794,6 +796,13 @@ func NewExampleApp(
 
 	return app
 }
+
+// SpecLock — shared store-version guard. The monadbft bridge's speculative
+// executor rewinds the commit multistore (RollbackToVersion deletes
+// versions); a query context built mid-rewind can see LatestVersion ahead
+// of the materialized IAVL trees and panic on ErrVersionDoesNotExist.
+// The mempool's ctx callback and the bridge's rewind path both hold it.
+func (app *EVMD) SpecLock() *sync.Mutex { return &app.specLock }
 
 func (app *EVMD) setAnteHandler(txConfig client.TxConfig, maxGasWanted uint64) {
 	options := evmante.HandlerOptions{

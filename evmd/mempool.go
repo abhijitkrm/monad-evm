@@ -38,9 +38,16 @@ func (app *EVMD) configureEVMMempool(appOpts servertypes.AppOptions, logger log.
 		return err
 	}
 
-	// create mempool
+	// create mempool — route ctx creation through SpecLock so a rechecker
+	// context can't race the monadbft bridge's speculative-execution
+	// rollback (RollbackToVersion deletes versions; LatestVersion can
+	// briefly read ahead of the materialized IAVL trees).
 	mempool := evmmempool.NewMempool(
-		app.CreateQueryContext,
+		func(height int64, prove bool) (sdk.Context, error) {
+			app.SpecLock().Lock()
+			defer app.SpecLock().Unlock()
+			return app.CreateQueryContext(height, prove)
+		},
 		logger,
 		app.EVMKeeper,
 		app.FeeMarketKeeper,
